@@ -205,49 +205,56 @@ public class BlockModelCacheSchematic
 		synchronized (this.blockStateModelCache)
 		{
 			this.blockStateModelCache.clear();
-			putAllSafe(this.blockStateModelCache, ((IMixinBlockStateModelSet) this.blockStateModelSet).litematica_getModelMap());
+			copyUsableEntries(this.blockStateModelCache, ((IMixinBlockStateModelSet) this.blockStateModelSet).litematica_getModelMap());
 		}
 
 		synchronized (this.blockModelCache)
 		{
 			this.blockModelCache.clear();
-			putAllSafe(this.blockModelCache, ((IMixinBlockModelSet) this.blockModelSet).litematica_getBlockModelCache());
+			copyUsableEntries(this.blockModelCache, ((IMixinBlockModelSet) this.blockModelSet).litematica_getBlockModelCache());
 		}
 
 		synchronized (this.fluidModelCache)
 		{
 			this.fluidModelCache.clear();
-			putAllSafe(this.fluidModelCache, ((IMixinFluidStateModelSet) this.fluidStateModelSet).litematica_getModelByFluid());
+			this.fluidModelCache.putAll(((IMixinFluidStateModelSet) this.fluidStateModelSet).litematica_getModelByFluid());
 		}
 	}
 
 	/**
-	 * Copies a vanilla model map into one of our caches, skipping unusable entries.
-	 * Mods such as ModernFix (dynamic resources) replace these maps with lazy ones that can
-	 * contain null values or throw when a value is resolved; ConcurrentHashMap rejects nulls,
-	 * and the resulting exception disconnected the player on world join.
-	 * Skipped entries are still resolved on demand by the computeIfAbsent() lookups.
+	 * ModernFix's dynamic resources make these maps lazy: a value can be null or throw when resolved,
+	 * which made putAll() disconnect the player on world join. Skipped states are fetched on demand.
 	 */
-	private static <K, V> void putAllSafe(ConcurrentHashMap<K, V> cache, Map<K, V> source)
+	private static <K, V> void copyUsableEntries(ConcurrentHashMap<K, V> cache, Map<K, V> source)
 	{
 		int skipped = 0;
+		boolean failureLogged = false;
 
 		for (Map.Entry<K, V> entry : source.entrySet())
 		{
 			try
 			{
-				K key = entry.getKey();
 				V value = entry.getValue();
 
-				if (key != null && value != null)
+				if (entry.getKey() != null && value != null)
 				{
-					cache.put(key, value);
-					continue;
+					cache.put(entry.getKey(), value);
+				}
+				else
+				{
+					skipped++;
 				}
 			}
-			catch (RuntimeException ignore) { }
+			catch (RuntimeException e)
+			{
+				skipped++;
 
-			skipped++;
+				if (!failureLogged)
+				{
+					failureLogged = true;
+					Litematica.LOGGER.warn("BlockModelCacheSchematic: failed to resolve the model for [{}]", entry.getKey(), e);
+				}
+			}
 		}
 
 		if (skipped > 0)
