@@ -2,6 +2,7 @@ package fi.dy.masa.litematica.render.schematic;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.annotation.Nullable;
 import org.joml.Matrix4f;
@@ -204,19 +205,54 @@ public class BlockModelCacheSchematic
 		synchronized (this.blockStateModelCache)
 		{
 			this.blockStateModelCache.clear();
-			this.blockStateModelCache.putAll(((IMixinBlockStateModelSet) this.blockStateModelSet).litematica_getModelMap());
+			putAllSafe(this.blockStateModelCache, ((IMixinBlockStateModelSet) this.blockStateModelSet).litematica_getModelMap());
 		}
 
 		synchronized (this.blockModelCache)
 		{
 			this.blockModelCache.clear();
-			this.blockModelCache.putAll(((IMixinBlockModelSet) this.blockModelSet).litematica_getBlockModelCache());
+			putAllSafe(this.blockModelCache, ((IMixinBlockModelSet) this.blockModelSet).litematica_getBlockModelCache());
 		}
 
 		synchronized (this.fluidModelCache)
 		{
 			this.fluidModelCache.clear();
-			this.fluidModelCache.putAll(((IMixinFluidStateModelSet) this.fluidStateModelSet).litematica_getModelByFluid());
+			putAllSafe(this.fluidModelCache, ((IMixinFluidStateModelSet) this.fluidStateModelSet).litematica_getModelByFluid());
+		}
+	}
+
+	/**
+	 * Copies a vanilla model map into one of our caches, skipping unusable entries.
+	 * Mods such as ModernFix (dynamic resources) replace these maps with lazy ones that can
+	 * contain null values or throw when a value is resolved; ConcurrentHashMap rejects nulls,
+	 * and the resulting exception disconnected the player on world join.
+	 * Skipped entries are still resolved on demand by the computeIfAbsent() lookups.
+	 */
+	private static <K, V> void putAllSafe(ConcurrentHashMap<K, V> cache, Map<K, V> source)
+	{
+		int skipped = 0;
+
+		for (Map.Entry<K, V> entry : source.entrySet())
+		{
+			try
+			{
+				K key = entry.getKey();
+				V value = entry.getValue();
+
+				if (key != null && value != null)
+				{
+					cache.put(key, value);
+					continue;
+				}
+			}
+			catch (RuntimeException ignore) { }
+
+			skipped++;
+		}
+
+		if (skipped > 0)
+		{
+			Litematica.LOGGER.warn("BlockModelCacheSchematic: skipped {} model cache entries without a usable model", skipped);
 		}
 	}
 
